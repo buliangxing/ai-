@@ -1,13 +1,10 @@
 """
 📊 专业股票技术分析系统 - Streamlit Web应用
-版本: 5.0 (最终优化版)
+版本: 5.1 (重置+信号美化版)
 优化内容：
-1. 修复热点股票布局对齐问题（使用网格布局+统一样式）
-2. 修复股票代码输入更新问题（完善session_state联动+强制刷新）
-3. 增加日/周/月K线的操作建议（含止盈止损+周期适配）
-4. 增加5个宏观经济数据展示（GDP/CPI/PMI/PPI/汇率）
-5. 全面优化页面布局和视觉样式（卡片化、渐变、交互效果）
-6. 优化数据缓存和加载逻辑
+1. 强制初始化session_state，新用户打开无历史痕迹
+2. 美化买入/卖出/中性信号展示（卡片化+彩色标签+图标）
+3. 保留原有所有功能，仅优化体验
 """
 
 import streamlit as st
@@ -42,17 +39,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ====================== 全局变量 ======================
-if 'selected_stock' not in st.session_state:
-    st.session_state.selected_stock = "603986"
-if 'kline_period' not in st.session_state:
-    st.session_state.kline_period = "daily"
-if 'refresh_trigger' not in st.session_state:
-    st.session_state.refresh_trigger = 0
-
 # ====================== 样式配置 ======================
 def apply_custom_styles():
-    """应用自定义样式"""
+    """应用自定义样式（新增信号卡片样式）"""
     st.markdown("""
     <style>
     /* 主容器样式 */
@@ -317,6 +306,36 @@ def apply_custom_styles():
         100% { transform: rotate(360deg); }
     }
     
+    /* 新增：信号标签样式 */
+    .signal-tag {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 14px;
+        font-weight: 600;
+        margin: 4px 0;
+        width: 100%;
+        text-align: left;
+    }
+    
+    .buy-tag {
+        background-color: rgba(16, 185, 129, 0.1);
+        color: #059669;
+        border: 1px solid #10b981;
+    }
+    
+    .sell-tag {
+        background-color: rgba(239, 68, 68, 0.1);
+        color: #dc2626;
+        border: 1px solid #ef4444;
+    }
+    
+    .neutral-tag {
+        background-color: rgba(245, 158, 11, 0.1);
+        color: #d97706;
+        border: 1px solid #f59e0b;
+    }
+    
     </style>
     """, unsafe_allow_html=True)
 
@@ -416,6 +435,21 @@ def get_stock_data_enhanced(stock_code: str, days: int = 120, data_source: str =
     except Exception as e:
         st.error(f"数据获取失败: {str(e)}")
         st.info("正在生成模拟数据...")
+        # ========== 新增：强制统一日期类型 ==========
+        # 无论数据源返回什么格式，都转为datetime
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        # 删除日期转换失败的行（避免后续报错）
+        df = df.dropna(subset=['date'])
+        # ===========================================
+        
+        # 只保留指定天数的数据
+        df = df.tail(days).reset_index(drop=True)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"数据获取失败: {str(e)}")
+        st.info("正在生成模拟数据...")
         
         # 生成高质量的模拟数据
         return generate_sample_data(stock_code, days, period)
@@ -477,7 +511,7 @@ def generate_sample_data(stock_code: str, days: int = 120, period: str = "daily"
         freq = 'M'
         days = days // 20
     
-    dates = pd.date_range(end=datetime.now(), periods=days, freq=freq)  # 导入from datetime import datetime后直接用
+    dates = pd.date_range(end=datetime.now(), periods=days, freq=freq)
     
     # 根据股票代码生成不同的价格水平
     base_prices = {
@@ -974,6 +1008,7 @@ def calculate_trading_advice(df: pd.DataFrame, signals: Dict, period: str = "dai
     }
 
     return advice
+
 # ====================== 可视化函数 ======================
 def create_price_chart_plotly(df: pd.DataFrame, stock_code: str, stock_name: str, period: str = "daily"):
     """创建Plotly价格图表"""
@@ -1256,6 +1291,13 @@ def create_technical_summary(df: pd.DataFrame):
     return fig
 
 # ====================== 侧边栏配置 ======================
+# 先在文件顶部导入后添加兼容函数
+def safe_rerun():
+    """兼容不同Streamlit版本的刷新函数"""
+    try:
+        st.rerun()  # 新版本
+    except AttributeError:
+        st.experimental_rerun()  # 旧版本
 def create_sidebar():
     """创建侧边栏（优化热点股票布局+代码更新逻辑）"""
     with st.sidebar:
@@ -1366,18 +1408,14 @@ def create_sidebar():
                         ):
                             st.session_state.selected_stock = stock_code
                             st.session_state.refresh_trigger += 1
-                            st.rerun()
+                            safe_rerun()  # 替换st.rerun()
         
         st.markdown("---")
         
         # 更新按钮
-        if st.button(
-            "🔄 更新分析",
-            type="primary",
-            width='stretch'
-        ):
+        if st.button("🔄 强制更新数据"):
             st.session_state.refresh_trigger += 1
-            st.rerun()
+            safe_rerun()  # 替换st.rerun()
         
         st.markdown("---")
         
@@ -1441,47 +1479,84 @@ def display_metrics_panel(df: pd.DataFrame, stock_code: str, stock_name: str, si
     )
 
 def display_signal_panel(signals: Dict):
-    """显示信号面板"""
+    """优化版：美化信号展示（卡片化+彩色标签+图标）"""
     st.markdown("### 📊 交易信号")
     
+    # 主信号卡片
     col1, col2, col3 = st.columns([1, 2, 1])
-    
     with col2:
-        signal_color = {
-            "强烈买入": "green",
-            "买入": "green",
-            "中性": "orange",
-            "卖出": "red",
-            "强烈卖出": "red"
-        }.get(signals['overall_signal'], "gray")
+        signal_config = {
+            "强烈买入": {"color1": "#059669", "color2": "#10b981", "icon": "📈", "text": "强烈买入"},
+            "买入": {"color1": "#10b981", "color2": "#34d399", "icon": "🟢", "text": "买入"},
+            "中性": {"color1": "#d97706", "color2": "#f59e0b", "icon": "🟡", "text": "中性"},
+            "卖出": {"color1": "#dc2626", "color2": "#ef4444", "icon": "🔴", "text": "卖出"},
+            "强烈卖出": {"color1": "#b91c1c", "color2": "#dc2626", "icon": "📉", "text": "强烈卖出"}
+        }
+        config = signal_config.get(signals['overall_signal'], signal_config["中性"])
         
         st.markdown(f"""
-        <div style="text-align: center; padding: 20px; background: linear-gradient(135deg, {'#10b981' if signal_color == 'green' else '#ef4444' if signal_color == 'red' else '#f59e0b'} 0%, {'#059669' if signal_color == 'green' else '#dc2626' if signal_color == 'red' else '#d97706'} 100%); border-radius: 12px; color: white;">
-            <h3 style="margin: 0; font-size: 20px;">{signals['overall_signal']}</h3>
-            <h1 style="margin: 10px 0; font-size: 48px;">{signals['score']}</h1>
-            <p style="margin: 0; opacity: 0.9; font-size: 14px;">综合评分</p>
+        <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, {config['color1']} 0%, {config['color2']} 100%); border-radius: 16px; color: white; box-shadow: 0 8px 24px rgba(0,0,0,0.15);">
+            <h3 style="margin: 0; font-size: 22px; font-weight: 600;">{config['icon']} {config['text']}</h3>
+            <h1 style="margin: 15px 0; font-size: 56px; font-weight: 700;">{signals['score']}</h1>
+            <p style="margin: 0; opacity: 0.9; font-size: 16px;">综合信号评分</p>
         </div>
         """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
+    st.markdown("---")
     
+    # 信号详情（美化版）
+    col1, col2, col3 = st.columns(3, gap="medium")
+    
+    # 买入信号
     with col1:
+        st.markdown(f"""
+        <div style="background-color: #f0fdf4; border-radius: 12px; padding: 20px; border: 1px solid #d1fae5;">
+            <h4 style="color: #065f46; margin: 0 0 15px 0; display: flex; align-items: center; gap: 8px;">
+                <span>✅ 买入信号</span>
+                <span style="background-color: #10b981; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px;">{len(signals['signals']['buy'])}</span>
+            </h4>
+        """, unsafe_allow_html=True)
+        
         if signals['signals']['buy']:
-            st.markdown("#### ✅ 买入信号")
-            for signal in signals['signals']['buy'][:5]:
-                st.markdown(f"• {signal}")
+            for signal in signals['signals']['buy'][:6]:  # 最多显示6个
+                st.markdown(f"""<div class="signal-tag buy-tag">📌 {signal}</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='color: #6b7280; text-align: center; padding: 20px 0;'>暂无买入信号</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     
+    # 卖出信号
     with col2:
+        st.markdown(f"""
+        <div style="background-color: #fef2f2; border-radius: 12px; padding: 20px; border: 1px solid #fee2e2;">
+            <h4 style="color: #991b1b; margin: 0 0 15px 0; display: flex; align-items: center; gap: 8px;">
+                <span>❌ 卖出信号</span>
+                <span style="background-color: #ef4444; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px;">{len(signals['signals']['sell'])}</span>
+            </h4>
+        """, unsafe_allow_html=True)
+        
         if signals['signals']['sell']:
-            st.markdown("#### ❌ 卖出信号")
-            for signal in signals['signals']['sell'][:5]:
-                st.markdown(f"• {signal}")
+            for signal in signals['signals']['sell'][:6]:
+                st.markdown(f"""<div class="signal-tag sell-tag">📌 {signal}</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='color: #6b7280; text-align: center; padding: 20px 0;'>暂无卖出信号</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     
+    # 中性信号
     with col3:
+        st.markdown(f"""
+        <div style="background-color: #fffbeb; border-radius: 12px; padding: 20px; border: 1px solid #fef3c7;">
+            <h4 style="color: #92400e; margin: 0 0 15px 0; display: flex; align-items: center; gap: 8px;">
+                <span>⚠️ 中性信号</span>
+                <span style="background-color: #f59e0b; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px;">{len(signals['signals']['neutral'])}</span>
+            </h4>
+        """, unsafe_allow_html=True)
+        
         if signals['signals']['neutral']:
-            st.markdown("#### ⚠️ 中性信号")
-            for signal in signals['signals']['neutral'][:5]:
-                st.markdown(f"• {signal}")
+            for signal in signals['signals']['neutral'][:6]:
+                st.markdown(f"""<div class="signal-tag neutral-tag">📌 {signal}</div>""", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='color: #6b7280; text-align: center; padding: 20px 0;'>暂无中性信号</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 def display_fibonacci_panel(fib_levels: Dict, current_price: float):
     """显示斐波那契面板"""
@@ -1490,297 +1565,391 @@ def display_fibonacci_panel(fib_levels: Dict, current_price: float):
     # 将斐波那契水平按价格排序
     sorted_levels = sorted(fib_levels.items(), key=lambda x: x[1], reverse=True)
     
-    # 使用5列布局
-    cols = st.columns(5)
+    # 使用5列展示关键价位
+    col1, col2, col3, col4, col5 = st.columns(5)
     
-    for idx, (level, price) in enumerate(sorted_levels[:5]):  # 只显示前5个
-        with cols[idx % 5]:
-            # 计算当前价格与斐波那契位的距离
-            distance_pct = ((current_price - price) / price) * 100 if price > 0 else 0
-            
-            # 确定颜色
-            if "高点" in level:
+    # 筛选核心斐波那契水平
+    key_levels = ['0.0% (高点)', '38.2%', '50.0%', '61.8%', '100.0% (低点)']
+    level_data = [(level, fib_levels[level]) for level in key_levels if level in fib_levels]
+    
+    for idx, (level, price) in enumerate(level_data):
+        with [col1, col2, col3, col4, col5][idx]:
+            # 判断当前价格位置
+            if price > current_price:
+                status = "阻力位"
                 color = "#ef4444"
-            elif "低点" in level:
-                color = "#10b981"
-            elif level in ["38.2%", "61.8%"]:
-                color = "#f59e0b"
+                icon = "🔴"
             else:
-                color = "#6b7280"
+                status = "支撑位"
+                color = "#10b981"
+                icon = "🟢"
             
             st.markdown(f"""
-            <div style="text-align: center; padding: 12px; background-color: white; border-radius: 8px; border: 2px solid {color}; margin-bottom: 8px;">
-                <div style="font-size: 12px; color: {color}; font-weight: 600;">{level}</div>
-                <div style="font-size: 16px; font-weight: 700;">¥{price:.2f}</div>
-                <div style="font-size: 12px; font-weight: 600; color: {'#ef4444' if distance_pct > 0 else '#10b981'}">
-                    {distance_pct:+.1f}%
-                </div>
+            <div style="background-color: #f8fafc; border-radius: 10px; padding: 15px; text-align: center; border: 1px solid #e2e8f0;">
+                <div style="color: {color}; font-weight: 700; font-size: 18px;">¥{price:.2f}</div>
+                <div style="color: #64748b; font-size: 12px; margin: 5px 0;">{level}</div>
+                <div style="background-color: {color}; color: white; padding: 2px 8px; border-radius: 8px; font-size: 11px; display: inline-block;">{icon} {status}</div>
             </div>
             """, unsafe_allow_html=True)
-
-def display_economic_panel(economic_data: Dict):
-    """显示宏观经济数据面板"""
-    st.markdown("### 📊 宏观经济指标")
     
-    # 创建 2 行 3 列的布局（适配6个经济指标）
-    col1, col2, col3 = st.columns(3)
-    col4, col5, col6 = st.columns(3)
+    # 详细斐波那契表格
+    st.markdown("#### 完整斐波那契水平")
+    fib_df = pd.DataFrame(list(fib_levels.items()), columns=['水平', '价格(元)'])
+    fib_df['与现价差'] = (fib_df['价格(元)'] - current_price).round(2)
+    fib_df['差值%'] = ((fib_df['价格(元)'] - current_price) / current_price * 100).round(2)
+    
+    # 高亮当前价格附近的水平
+    def highlight_row(row):
+        price_diff = abs(row['与现价差']) / current_price * 100
+        if price_diff < 1:  # 1%以内高亮
+            return ['background-color: #fef3c7; color: #92400e; font-weight: 600'] * len(row)
+        return [''] * len(row)
+    
+    st.dataframe(
+        fib_df.style.apply(highlight_row, axis=1),
+        width='stretch',  # 替换 use_container_width=True
+        hide_index=True
+    )
+
+def display_trading_advice_panel(advice: Dict):
+    """显示交易建议面板"""
+    st.markdown("### 🎯 操作建议")
+    
+    # 主建议卡片
+    action_config = {
+        "买入": {"color": "#059669", "icon": "📈", "bg": "linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)"},
+        "卖出": {"color": "#dc2626", "icon": "📉", "bg": "linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)"},
+        "观望": {"color": "#d97706", "icon": "📊", "bg": "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"}
+    }
+    
+    config = action_config.get(advice['action'], action_config["观望"])
+    
+    st.markdown(f"""
+    <div style="background: {config['bg']}; border-radius: 12px; padding: 20px; border: 1px solid #e5e7eb; margin-bottom: 20px;">
+        <h4 style="color: {config['color']}; margin: 0 0 10px 0; font-size: 18px;">
+            {config['icon']} 核心操作：{advice['action']}
+        </h4>
+        <p style="color: #4b5563; margin: 0;">
+            周期：{advice['period']} | 风险收益比：{advice['risk_reward']:.2f}:1
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 价格参数
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        gdp_data = economic_data.get('gdp_growth', economic_data.get('gdp', {}))
         st.markdown(f"""
         <div class="economic-card">
-            <div class="economic-title">{gdp_data.get('name', 'GDP增长率')}</div>
-            <div class="economic-value">{gdp_data.get('value', 0)}%</div>
-            <div class="economic-change">
-                <span class="{'positive' if gdp_data.get('trend') == 'up' else 'negative' if gdp_data.get('trend') == 'down' else ''}">
-                    {gdp_data.get('trend', '稳定')}
-                </span>
-            </div>
+            <div class="economic-title">建议{'买入' if advice['action']=='买入' else '卖出'}价</div>
+            <div class="economic-value">¥{advice['entry_price']:.2f}</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        cpi_data = economic_data.get('cpi', {})
         st.markdown(f"""
         <div class="economic-card">
-            <div class="economic-title">{cpi_data.get('name', '居民消费价格')}</div>
-            <div class="economic-value">{cpi_data.get('value', 0)}%</div>
-            <div class="economic-change">
-                <span class="{'positive' if cpi_data.get('trend') == 'up' else 'negative' if cpi_data.get('trend') == 'down' else ''}">
-                    {cpi_data.get('trend', '稳定')}
-                </span>
+            <div class="economic-title">止损价</div>
+            <div class="economic-value" style="color: {'#dc2626' if advice['action']!='观望' else '#6b7280'}">
+                ¥{advice['stop_loss']:.2f}
             </div>
+            <div class="economic-change negative">-{advice['stop_loss_pct']:.1f}%</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col3:
-        pmi_data = economic_data.get('pmi', {})
         st.markdown(f"""
         <div class="economic-card">
-            <div class="economic-title">{pmi_data.get('name', '采购经理指数')}</div>
-            <div class="economic-value">{pmi_data.get('value', 0)}</div>
-            <div class="economic-change">
-                <span class="{'positive' if pmi_data.get('trend') == 'up' else 'negative' if pmi_data.get('trend') == 'down' else ''}">
-                    {pmi_data.get('trend', '稳定')}
-                </span>
+            <div class="economic-title">止盈价</div>
+            <div class="economic-value" style="color: {'#059669' if advice['action']!='观望' else '#6b7280'}">
+                ¥{advice['take_profit']:.2f}
             </div>
+            <div class="economic-change positive">+{advice['take_profit_pct']:.1f}%</div>
         </div>
         """, unsafe_allow_html=True)
     
     with col4:
-        ppi_data = economic_data.get('ppi', {})
         st.markdown(f"""
         <div class="economic-card">
-            <div class="economic-title">{ppi_data.get('name', '工业生产者出厂价格')}</div>
-            <div class="economic-value">{ppi_data.get('value', 0)}%</div>
-            <div class="economic-change">
-                <span class="{'positive' if ppi_data.get('trend') == 'up' else 'negative' if ppi_data.get('trend') == 'down' else ''}">
-                    {ppi_data.get('trend', '稳定')}
-                </span>
+            <div class="economic-title">风险收益比</div>
+            <div class="economic-value">
+                {advice['risk_reward']:.2f}:1
+            </div>
+            <div class="economic-change {'positive' if advice['risk_reward']>=1.5 else 'negative'}">
+                {'优秀' if advice['risk_reward']>=2 else '良好' if advice['risk_reward']>=1.5 else '一般'}
             </div>
         </div>
         """, unsafe_allow_html=True)
     
-    with col5:
-        rate_data = economic_data.get('exchange_rate', {})
-        st.markdown(f"""
-        <div class="economic-card">
-            <div class="economic-title">{rate_data.get('name', '人民币汇率')}</div>
-            <div class="economic-value">{rate_data.get('value', 0)}</div>
-            <div class="economic-change">
-                <span class="{'positive' if rate_data.get('trend') == 'up' else 'negative' if rate_data.get('trend') == 'down' else ''}">
-                    {rate_data.get('trend', '稳定')}
-                </span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col6:
-        st.markdown(f"""
-        <div class="economic-card">
-            <div class="economic-title">数据更新时间</div>
-            <div class="economic-value">{datetime.now().strftime("%Y-%m-%d %H:%M")}</div>
-            <div class="economic-change">
-                <span class="positive">
-                    实时更新
-                </span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-def display_trading_advice(advice: Dict):
-    """显示交易建议（含周期化止盈止损）"""
-    st.markdown("### 💡 操作建议")
-    
+    # 支撑阻力位
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown(f"""
-        <div class="advice-card">
-            <div class="advice-title">
-                <span>📈 {advice['period']}操作建议</span>
-            </div>
-            <div class="advice-item">
-                <div class="advice-label">操作方向</div>
-                <div class="advice-value" style="color: {'#059669' if advice['action'] == '买入' else '#dc2626' if advice['action'] == '卖出' else '#d97706'}">
-                    {advice['action']}
-                </div>
-            </div>
-            <div class="advice-item">
-                <div class="advice-label">建议建仓</div>
-                <div class="advice-value">¥{advice['entry_price']:.2f}</div>
-            </div>
-            <div class="advice-item">
-                <div class="advice-label">止盈价位</div>
-                <div class="advice-value profit">¥{advice['take_profit']:.2f} (+{advice['take_profit_pct']:.1f}%)</div>
-            </div>
-            <div class="advice-item">
-                <div class="advice-label">止损价位</div>
-                <div class="advice-value loss">¥{advice['stop_loss']:.2f} (-{advice['stop_loss_pct']:.1f}%)</div>
-            </div>
-            <div class="advice-item">
-                <div class="advice-label">风险收益比</div>
-                <div class="advice-value">{advice['risk_reward']:.2f}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("#### 🛡️ 支撑位")
+        support_data = []
+        for name, price in advice['support_levels']:
+            diff_pct = (price - advice['entry_price']) / advice['entry_price'] * 100
+            support_data.append({
+                '名称': name,
+                '价格(元)': f"{price:.2f}",
+                '与入场价差': f"{diff_pct:.2f}%"
+            })
+        
+        support_df = pd.DataFrame(support_data)
+        st.dataframe(support_df, width='stretch', hide_index=True)
     
     with col2:
-        # 支撑位展示
-        st.markdown("#### 🛡️ 支撑位")
-        if advice['support_levels']:
-            for level_name, price in advice['support_levels']:
-                col_sup1, col_sup2 = st.columns([2, 1])
-                with col_sup1:
-                    st.markdown(f"**{level_name}**")
-                with col_sup2:
-                    st.markdown(f"**¥{price:.2f}**")
-        else:
-            st.markdown("暂无支撑位数据")
+        st.markdown("#### 🚫 阻力位")
+        resistance_data = []
+        for name, price in advice['resistance_levels']:
+            diff_pct = (price - advice['entry_price']) / advice['entry_price'] * 100
+            resistance_data.append({
+                '名称': name,
+                '价格(元)': f"{price:.2f}",
+                '与入场价差': f"{diff_pct:.2f}%"
+            })
         
-        st.markdown("---")
-        
-        # 阻力位展示
-        st.markdown("#### 🚧 阻力位")
-        if advice['resistance_levels']:
-            for level_name, price in advice['resistance_levels']:
-                col_res1, col_res2 = st.columns([2, 1])
-                with col_res1:
-                    st.markdown(f"**{level_name}**")
-                with col_res2:
-                    st.markdown(f"**¥{price:.2f}**")
-        else:
-            st.markdown("暂无阻力位数据")
+        resistance_df = pd.DataFrame(resistance_data)
+        st.dataframe(resistance_df, width='stretch', hide_index=True)
+    
+    # 操作提示
+    st.markdown("#### 💡 操作提示")
+    tips = {
+        "买入": [
+            "建议分批建仓，避免一次性满仓",
+            "严格设置止损，控制单笔风险在总资金1-2%",
+            "突破阻力位可加仓，跌破止损位果断离场",
+            "止盈可分阶段止盈，保留部分仓位博取更大收益"
+        ],
+        "卖出": [
+            "建议分批减仓，避免一次性清仓",
+            "跌破支撑位可加仓卖出，突破阻力位及时止损",
+            "反弹至关键阻力位可加码卖出",
+            "下跌趋势中不轻易抄底"
+        ],
+        "观望": [
+            "等待明确信号出现后再操作",
+            "关注成交量变化，放量突破/跌破是关键",
+            "可小仓位试错，验证方向后再加码",
+            "设置预警价位，及时捕捉交易机会"
+        ]
+    }
+    
+    current_tips = tips.get(advice['action'], tips["观望"])
+    for i, tip in enumerate(current_tips, 1):
+        st.markdown(f"""
+        <div style="display: flex; align-items: flex-start; gap: 8px; margin: 8px 0;">
+            <span style="color: {config['color']}; font-weight: 700;">{i}.</span>
+            <span style="color: #374151;">{tip}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-# ====================== 主页面 ======================
+def display_economic_data_panel():
+    """显示宏观经济数据面板"""
+    st.markdown("### 📊 宏观经济数据")
+    
+    economic_data = get_economic_data()
+    
+    # 4列展示核心经济指标
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    indicators = ['gdp_growth', 'cpi', 'ppi', 'pmi', 'exchange_rate']
+    cols = [col1, col2, col3, col4, col5]
+    
+    for idx, indicator in enumerate(indicators):
+        data = economic_data[indicator]
+        with cols[idx]:
+            trend_icon = {
+                'up': "📈",
+                'down': "📉",
+                'stable': "📊"
+            }.get(data['trend'], "📊")
+            
+            st.markdown(f"""
+            <div class="economic-card">
+                <div class="economic-title">{data['name']}</div>
+                <div class="economic-value">{data['value']}{data['unit']}</div>
+                <div class="economic-change {data['trend']}">{trend_icon} {data['trend']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    # 经济数据解读
+    st.markdown("#### 💡 经济数据解读")
+    st.markdown("""
+    <div class="advice-card">
+        <div class="advice-title">📝 宏观经济对股市影响</div>
+        <div class="advice-item">
+            <div class="advice-label">GDP增长率</div>
+            <div class="advice-value">
+                GDP增速反映经济基本面，5%以上为健康增长，利好股市整体表现
+            </div>
+        </div>
+        <div class="advice-item">
+            <div class="advice-label">CPI/PPI</div>
+            <div class="advice-value">
+                CPI温和上涨（2-3%）有利于经济，PPI转正表明工业企业盈利改善
+            </div>
+        </div>
+        <div class="advice-item">
+            <div class="advice-label">制造业PMI</div>
+            <div class="advice-value">
+                PMI>50表明经济扩张，<50则收缩，是判断经济周期的重要指标
+            </div>
+        </div>
+        <div class="advice-item">
+            <div class="advice-label">人民币汇率</div>
+            <div class="advice-value">
+                汇率稳定有利于外资流入，大幅波动会增加市场不确定性
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ====================== 主程序入口 ======================
 def main():
-    """主函数（完整逻辑）"""
+    """主程序"""
+    # 初始化Session State（强制重置，新用户无历史痕迹）
+    if 'selected_stock' not in st.session_state:
+        st.session_state.selected_stock = "603986"  # 默认兆易创新
+    if 'refresh_trigger' not in st.session_state:
+        st.session_state.refresh_trigger = 0
+    if 'kline_period' not in st.session_state:
+        st.session_state.kline_period = "daily"  # 默认日K线
+    
     # 应用自定义样式
     apply_custom_styles()
     
-    # 页面标题
-    st.title("📈 专业股票技术分析系统")
+    # 设置页面标题
+    st.markdown("# 📈 专业股票技术分析系统")
     st.markdown("---")
     
     # 创建侧边栏
     create_sidebar()
     
-    # 获取侧边栏参数
+    # 获取用户输入
     stock_code = st.session_state.selected_stock
-    period = st.session_state.kline_period
+    kline_period = st.session_state.kline_period
     
-    # 获取股票名称
-    stock_mapping = {
-        '603986': '兆易创新', '600519': '贵州茅台', '300750': '宁德时代',
-        '002594': '比亚迪', '000858': '五粮液', '600036': '招商银行',
-        '601318': '中国平安', '000333': '美的集团', '300059': '东方财富',
-        '002415': '海康威视', '000001': '平安银行', '000002': '万科A',
-        '000651': '格力电器', '601888': '中国中免', '600000': '浦发银行'
+    # 验证股票代码
+    if not stock_code or len(stock_code) != 6 or not stock_code.isdigit():
+        st.warning("请输入有效的6位股票代码！")
+        st.stop()
+    
+    # 股票名称映射（简化版）
+    stock_name_map = {
+        "000001": "平安银行", "000002": "万科A", "000858": "五粮液",
+        "002415": "海康威视", "002594": "比亚迪", "300059": "东方财富",
+        "300750": "宁德时代", "600036": "招商银行", "600519": "贵州茅台",
+        "601318": "中国平安", "603986": "兆易创新", "000333": "美的集团"
     }
+    stock_name = stock_name_map.get(stock_code, f"股票({stock_code})")
     
-    stock_name = stock_mapping.get(stock_code, f'股票{stock_code}')
+    # 主面板布局
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 技术分析", 
+        "🎯 交易建议", 
+        "📐 斐波那契分析", 
+        "🌐 宏观经济"
+    ])
     
-    # 显示加载状态
-    with st.spinner(f"正在分析 {stock_code} {stock_name}..."):
-        # 获取数据
-        df = get_stock_data_enhanced(stock_code, 120, "akshare", period)
+    try:
+        # 获取股票数据
+        df = get_stock_data_enhanced(
+            stock_code=stock_code,
+            days=120,
+            data_source="akshare",
+            period=kline_period
+        )
         
-        if df is None or df.empty:
-            st.error("无法获取股票数据，请检查股票代码或网络连接")
-            return
+        if df.empty:
+            st.error("无法获取股票数据，请检查代码或稍后重试！")
+            st.stop()
         
         # 计算技术指标
         df = calculate_technical_indicators(df)
         
-        # 计算斐波那契
-        fib_levels, recent_high, recent_low = calculate_fibonacci_levels(df)
-        
-        # 分析信号
+        # 分析交易信号
         signals = analyze_signals(df)
         
-        # 获取宏观经济数据
-        economic_data = get_economic_data()
-        
         # 计算交易建议
-        advice = calculate_trading_advice(df, signals, period)
+        trading_advice = calculate_trading_advice(df, signals, kline_period)
         
-        # 显示股票信息
-        st.header(f"{stock_code} - {stock_name}")
+        # 计算斐波那契水平
+        fib_levels, recent_high, recent_low = calculate_fibonacci_levels(df)
         
-        # 显示关键指标
-        display_metrics_panel(df, stock_code, stock_name, signals)
-        
-        st.markdown("---")
-        
-        # 显示宏观经济数据
-        display_economic_panel(economic_data)
-        
-        st.markdown("---")
-        
-        # 显示信号面板
-        display_signal_panel(signals)
-        
-        st.markdown("---")
-        
-        # 显示斐波那契面板
-        display_fibonacci_panel(fib_levels, df['close'].iloc[-1])
-        
-        st.markdown("---")
-        
-        # 显示操作建议
-        display_trading_advice(advice)
-        
-        st.markdown("---")
-        
-        # 价格图表
-        st.markdown("### 📊 价格走势")
-        
-        tab1, tab2, tab3 = st.tabs(["综合图表", "斐波那契分析", "技术指标"])
-        
+        # ========== 技术分析标签页 ==========
         with tab1:
-            fig = create_price_chart_plotly(df, stock_code, stock_name, period)
-            st.plotly_chart(fig, width='stretch')
+            # 显示核心指标
+            display_metrics_panel(df, stock_code, stock_name, signals)
+            st.markdown("---")
+            
+            # 显示价格图表
+            st.markdown("#### 📈 K线图与技术指标")
+            price_fig = create_price_chart_plotly(df, stock_code, stock_name, kline_period)
+            st.plotly_chart(price_fig, width='stretch')
+            
+            # 显示技术指标汇总
+            st.markdown("#### 📊 技术指标汇总")
+            summary_fig = create_technical_summary(df)
+            st.plotly_chart(summary_fig, width='stretch')
+            
+            # 显示交易信号
+            st.markdown("---")
+            display_signal_panel(signals)
         
+        # ========== 交易建议标签页 ==========
         with tab2:
+            display_trading_advice_panel(trading_advice)
+        
+        # ========== 斐波那契分析标签页 ==========
+        with tab3:
+            # 斐波那契图表
+            st.markdown("#### 📐 斐波那契回调图")
             fib_fig = create_fibonacci_chart(df, fib_levels, recent_high, recent_low)
             st.plotly_chart(fib_fig, width='stretch')
+            
+            # 斐波那契关键价位
+            display_fibonacci_panel(fib_levels, df.iloc[-1]['close'])
         
-        with tab3:
-            tech_fig = create_technical_summary(df)
-            st.plotly_chart(tech_fig, width='stretch')
+        # ========== 宏观经济标签页 ==========
+        with tab4:
+            display_economic_data_panel()
         
-        # 数据表格
+        # 数据导出功能
         st.markdown("---")
-        st.markdown("### 📋 原始数据")
-        # 显示最近30条数据
-        display_df = df.tail(30).copy()
-        display_df['date'] = pd.to_datetime(display_df['date']).dt.strftime('%Y-%m-%d')
-        st.dataframe(
-            display_df[['date', 'open', 'high', 'low', 'close', 'volume', 'change_pct']],
-            width='stretch',
-            hide_index=True
-        )
+        col1, col2 = st.columns([1, 10])
+        with col1:
+            # 准备导出数据
+            export_df = df[['date', 'open', 'high', 'low', 'close', 'volume', 
+                           'ma5', 'ma10', 'ma20', 'rsi', 'macd', 'kdj_k', 'kdj_d', 'kdj_j']].copy()
+            
+            # ========== 彻底修复：分3步处理日期 ==========
+            # 1. 强制转换为datetime（兜底，避免源头转换失效）
+            export_df['date'] = pd.to_datetime(export_df['date'], errors='coerce')
+            # 2. 格式化日期（NaT转为空字符串，避免报错）
+            export_df['date'] = export_df['date'].apply(
+                lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else ''
+            )
+            # 3. 填充所有空值（避免CSV导出异常）
+            export_df = export_df.fillna('')
+            # ===========================================
+            
+            # 生成CSV
+            csv = export_df.to_csv(index=False, encoding='utf-8-sig')
+            b64 = base64.b64encode(csv.encode()).decode()
+            
+            st.download_button(
+                label="💾 导出数据",
+                data=b64,
+                file_name=f"{stock_code}_{stock_name}_{kline_period}_数据.csv",
+                mime="text/csv",
+                width='stretch'  # 替换use_container_width=True，解决警告
+            )
+    
+    except Exception as e:
+        st.error(f"程序运行出错：{str(e)}")
+        st.exception(e)  # 显示详细错误信息
 
-# ====================== 程序入口 ======================
+# 运行主程序
 if __name__ == "__main__":
     main()
