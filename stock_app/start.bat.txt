@@ -1,0 +1,30 @@
+@echo off
+echo 正在启动股票分析系统...
+echo.
+
+:: 检查Python
+python --version
+if errorlevel 1 (
+    echo ❌ 未找到Python，请先安装Python
+    pause
+    exit /b 1
+)
+
+:: 安装依赖
+echo 安装所需依赖...
+pip install streamlit pandas numpy matplotlib plotly yfinance akshare ta --user
+echo.
+
+:: 设置环境变量
+set PYTHONPATH=%cd%
+set STREAMLIT_SERVER_PORT=8502
+
+:: 启动应用
+echo 启动应用...
+echo 请稍等，浏览器将自动打开...
+echo 如果浏览器没有自动打开，请手动访问：http://localhost:8502
+echo.
+
+python -m streamlit run app.py --server.port 8502 --server.address 0.0.0.0
+
+pause

@@ -1,0 +1,17 @@
+# test.py
+import streamlit as st
+
+st.title("🎈 Streamlit测试页面")
+st.write("恭喜！如果看到这个页面，说明Streamlit运行正常！")
+st.balloons()
+
+# 添加一个简单的交互
+name = st.text_input("请输入您的名字：")
+if name:
+    st.write(f"你好，{name}！🎉")
+    
+# 显示当前目录
+st.write("当前目录文件：")
+import os
+files = os.listdir(".")
+st.write(files)
